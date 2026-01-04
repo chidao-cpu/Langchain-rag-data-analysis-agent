@@ -18,6 +18,8 @@ class DataVisualizer:
         self.config = Config()
         self.data = None
         self.features_data = None
+        self.data_info = None
+        self.visualization_suggestions = None
         
     def load_data(self, processed_file=None, features_file=None):
         """加载数据"""
@@ -25,8 +27,13 @@ class DataVisualizer:
         processed_file = processed_file or self.config.PROCESSED_DATA_FILE
         if os.path.exists(processed_file):
             self.data = pd.read_csv(processed_file)
-            if '销售日期' in self.data.columns:
-                self.data['销售日期'] = pd.to_datetime(self.data['销售日期'])
+            # 检测并转换日期时间列
+            for col in self.data.columns:
+                if pd.api.types.is_datetime64_any_dtype(self.data[col]) or '日期' in col or 'time' in col.lower():
+                    try:
+                        self.data[col] = pd.to_datetime(self.data[col])
+                    except:
+                        pass
             print(f"成功加载预处理后的数据: {processed_file}")
         
         # 加载特征工程后的数据
@@ -37,250 +44,269 @@ class DataVisualizer:
         
         return self.data, self.features_data
     
-    def plot_numerical_distribution(self, numerical_cols=None):
-        """绘制数值型特征的分布直方图"""
+    def collect_data_info(self):
+        """收集数据信息作为API请求的辅助prompt"""
         if self.data is None:
             raise ValueError("请先加载数据")
         
-        numerical_cols = numerical_cols or ['价格', '销量', '成本', '客户评分', '销售额', '利润', '利润率']
-        numerical_cols = [col for col in numerical_cols if col in self.data.columns]
+        data_info = {
+            'shape': f"数据形状: {self.data.shape[0]} 行, {self.data.shape[1]} 列",
+            'columns': f"列名: {', '.join(self.data.columns.tolist())}",
+            'data_types': "数据类型:\n" + '\n'.join([f"  {col}: {self.data[col].dtype}" for col in self.data.columns]),
+            'missing_values': "缺失值情况:\n" + '\n'.join([f"  {col}: {self.data[col].isnull().sum()} ({self.data[col].isnull().sum()/len(self.data)*100:.1f}%)" for col in self.data.columns if self.data[col].isnull().sum() > 0]),
+            'numerical_columns': f"数值型列: {', '.join(self.data.select_dtypes(include=[np.number]).columns.tolist())}",
+            'categorical_columns': f"类别型列: {', '.join(self.data.select_dtypes(include=['object', 'category']).columns.tolist())}",
+            'datetime_columns': f"日期时间列: {', '.join(self.data.select_dtypes(include=['datetime64']).columns.tolist())}"
+        }
         
-        n_cols = 2
-        n_rows = (len(numerical_cols) + 1) // 2
-        
-        plt.figure(figsize=(15, 5 * n_rows))
-        
-        for i, col in enumerate(numerical_cols, 1):
-            plt.subplot(n_rows, n_cols, i)
-            sns.histplot(self.data[col], bins=20, kde=True, color='skyblue')
-            plt.title(f'{col}的分布')
-            plt.xlabel(col)
-            plt.ylabel('频率')
-            plt.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        output_path = os.path.join(self.config.VISUALIZATIONS_DIR, 'numerical_distribution.png')
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        print(f"数值型特征分布直方图已保存到: {output_path}")
-    
-    def plot_correlation_heatmap(self):
-        """绘制相关性热力图"""
-        if self.data is None:
-            raise ValueError("请先加载数据")
-        
-        # 选择数值型特征
+        # 添加数值型列的统计信息
         numerical_cols = self.data.select_dtypes(include=[np.number]).columns.tolist()
+        if numerical_cols:
+            stats = self.data[numerical_cols].describe().round(2)
+            data_info['numerical_stats'] = "数值型列统计信息:\n" + stats.to_string()
         
-        plt.figure(figsize=(12, 10))
-        corr_matrix = self.data[numerical_cols].corr()
+        # 添加类别型列的唯一值信息
+        categorical_cols = self.data.select_dtypes(include=['object', 'category']).columns.tolist()
+        if categorical_cols:
+            unique_values = "类别型列唯一值:\n"
+            for col in categorical_cols:
+                unique_vals = self.data[col].unique()
+                # 限制显示的唯一值数量
+                if len(unique_vals) > 10:
+                    unique_vals = unique_vals[:10] + ['...']
+                unique_values += f"  {col}: {', '.join(map(str, unique_vals))}\n"
+            data_info['categorical_unique'] = unique_values
         
-        # 使用mask只显示下三角
-        mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
-        
-        sns.heatmap(corr_matrix, mask=mask, annot=True, cmap='coolwarm', center=0,
-                    square=True, linewidths=.5, cbar_kws={'shrink': .8})
-        plt.title('特征相关性热力图', fontsize=16)
-        plt.xticks(rotation=45, ha='right')
-        plt.yticks(rotation=0)
-        
-        output_path = os.path.join(self.config.VISUALIZATIONS_DIR, 'correlation_heatmap.png')
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        print(f"相关性热力图已保存到: {output_path}")
+        self.data_info = data_info
+        return data_info
     
-    def plot_time_series(self, target_col='销售额', group_col='产品类别'):
-        """绘制时间序列图"""
+    def get_visualization_suggestions(self):
+        """调用DeepSeek API获取可视化建议"""
         if self.data is None:
             raise ValueError("请先加载数据")
         
-        if '销售日期' not in self.data.columns:
-            raise ValueError("数据中没有销售日期列")
+        # 如果数据信息未收集，则先收集
+        if self.data_info is None:
+            self.data_info = self.collect_data_info()
         
-        plt.figure(figsize=(15, 8))
+        print(f"\n开始获取可视化建议...")
         
-        if group_col in self.data.columns:
-            # 按产品类别分组绘制
-            for category in self.data[group_col].unique():
-                category_data = self.data[self.data[group_col] == category]
-                plt.plot(category_data['销售日期'], category_data[target_col], 
-                         marker='o', label=f'{group_col}: {category}')
+        # 初始化DeepSeek API客户端（动态导入以避免循环导入）
+        from src.langchain_agent import OpenAIClientLLM
+        deepseek_client = OpenAIClientLLM()
+        
+        # 构建data_info字符串
+        data_info_str = "\n".join([f"{key}: {value}" for key, value in self.data_info.items()])
+        
+        # 构建prompt
+        prompt = f"你是一个数据可视化专家，请根据以下数据集信息，建议合适的可视化方式：\n\n"
+        prompt += data_info_str
+        prompt += f"\n请以JSON格式输出建议的可视化方式，每个可视化应包含：\n"
+        prompt += f"1. chart_type: 图表类型（如histogram, scatter, boxplot等）\n"
+        prompt += f"2. title: 图表标题\n"
+        prompt += f"3. x_axis: X轴字段\n"
+        prompt += f"4. y_axis: Y轴字段\n"
+        prompt += f"5. description: 图表描述\n"
+        prompt += f"6. recommended: 是否推荐（true/false）\n"
+        prompt += f"\n例如：\n"
+        prompt += f"[{{\"chart_type\": \"histogram\", \"title\": \"价格分布\", \"x_axis\": \"价格\", \"y_axis\": \"频率\", \"description\": \"产品价格的分布情况\", \"recommended\": true}}]\n"
+        prompt += f"\n请只输出JSON格式的结果，不要添加任何其他文字或解释。\n"
+        
+        try:
+            # 调用DeepSeek API获取建议
+            print("  正在调用DeepSeek API获取可视化建议...")
+            response = deepseek_client.invoke(prompt)
+            
+            # 解析API响应
+            import json
+            self.visualization_suggestions = json.loads(response)
+            
+            print(f"  成功获取{len(self.visualization_suggestions)}个可视化建议")
+            return self.visualization_suggestions
+            
+        except Exception as e:
+            print(f"  调用DeepSeek API失败：{str(e)}")
+            self.visualization_suggestions = []
+            return self.visualization_suggestions
+    
+    
+
+    
+    def plot_from_suggestions(self):
+        """根据可视化建议生成图表"""
+        if self.visualization_suggestions is None:
+            print("未获取到可视化建议，使用默认可视化流程")
+            return
+        
+        print(f"\n根据可视化建议生成图表...")
+        
+        # 为不同图表类型分配处理函数
+        chart_handlers = {
+            'histogram': self._plot_histogram,
+            'scatter': self._plot_scatter,
+            'boxplot': self._plot_boxplot,
+            'bar': self._plot_bar,
+            'line': self._plot_line,
+            'heatmap': self.plot_correlation_heatmap,
+            'pairplot': self.plot_scatter_matrix,
+            'feature_importance': self.plot_feature_importance
+        }
+        
+        # 跟踪已生成的图表，避免重复
+        self.generated_charts = set()
+        
+        for suggestion in self.visualization_suggestions:
+            try:
+                # 只生成推荐的图表
+                if not suggestion.get('recommended', True):
+                    continue
+                
+                chart_type = suggestion.get('chart_type')
+                title = suggestion.get('title')
+                x_axis = suggestion.get('x_axis')
+                y_axis = suggestion.get('y_axis')
+                description = suggestion.get('description')
+                
+                # 检查必要参数
+                if not chart_type or not title:
+                    continue
+                
+                # 检查列是否存在
+                if x_axis and x_axis not in self.data.columns:
+                    print(f"跳过{title}: X轴字段{x_axis}不存在")
+                    continue
+                if y_axis and y_axis not in self.data.columns:
+                    print(f"跳过{title}: Y轴字段{y_axis}不存在")
+                    continue
+                
+                # 生成图表唯一标识
+                chart_id = f"{chart_type}_{x_axis or 'none'}_{y_axis or 'none'}"
+                if chart_id in self.generated_charts:
+                    continue
+                self.generated_charts.add(chart_id)
+                
+                print(f"  生成图表: {title}")
+                
+                # 根据图表类型调用相应的处理函数
+                if chart_type in chart_handlers:
+                    if chart_type in ['histogram', 'scatter', 'boxplot', 'bar', 'line']:
+                        chart_handlers[chart_type](x_axis, y_axis, title, description)
+                    else:
+                        chart_handlers[chart_type]()
+                else:
+                    print(f"  不支持的图表类型: {chart_type}")
+                    
+            except Exception as e:
+                print(f"  生成图表时出错 {suggestion.get('title', '未知')}: {e}")
+                continue
+        
+    def _plot_histogram(self, x_axis, y_axis, title, description):
+        """绘制直方图"""
+        plt.figure(figsize=(12, 6))
+        sns.histplot(self.data[x_axis], bins=20, kde=True, color='skyblue')
+        plt.title(title)
+        plt.xlabel(x_axis)
+        plt.ylabel('频率')
+        plt.grid(True, alpha=0.3)
+        
+        output_path = os.path.join(self.config.VISUALIZATIONS_DIR, f'{title}_histogram.png')
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"    直方图已保存到: {output_path}")
+    
+    def _plot_scatter(self, x_axis, y_axis, title, description):
+        """绘制散点图"""
+        plt.figure(figsize=(12, 6))
+        sns.scatterplot(data=self.data, x=x_axis, y=y_axis, color='orange', alpha=0.7)
+        plt.title(title)
+        plt.xlabel(x_axis)
+        plt.ylabel(y_axis)
+        plt.grid(True, alpha=0.3)
+        
+        output_path = os.path.join(self.config.VISUALIZATIONS_DIR, f'{title}_scatter.png')
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"    散点图已保存到: {output_path}")
+    
+    def _plot_boxplot(self, x_axis, y_axis, title, description):
+        """绘制箱线图"""
+        plt.figure(figsize=(12, 6))
+        sns.boxplot(data=self.data, x=x_axis, y=y_axis, palette='Set2')
+        plt.title(title)
+        plt.xlabel(x_axis)
+        plt.ylabel(y_axis)
+        plt.xticks(rotation=45)
+        plt.grid(True, alpha=0.3)
+        
+        output_path = os.path.join(self.config.VISUALIZATIONS_DIR, f'{title}_boxplot.png')
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"    箱线图已保存到: {output_path}")
+    
+    def _plot_bar(self, x_axis, y_axis, title, description):
+        """绘制柱状图"""
+        plt.figure(figsize=(12, 6))
+        sns.barplot(data=self.data, x=x_axis, y=y_axis, palette='Set3')
+        plt.title(title)
+        plt.xlabel(x_axis)
+        plt.ylabel(y_axis)
+        plt.xticks(rotation=45)
+        plt.grid(True, alpha=0.3)
+        
+        output_path = os.path.join(self.config.VISUALIZATIONS_DIR, f'{title}_bar.png')
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"    柱状图已保存到: {output_path}")
+    
+    def _plot_line(self, x_axis, y_axis, title, description):
+        """绘制折线图"""
+        plt.figure(figsize=(12, 6))
+        sns.lineplot(data=self.data, x=x_axis, y=y_axis, color='green', marker='o')
+        plt.title(title)
+        plt.xlabel(x_axis)
+        plt.ylabel(y_axis)
+        plt.xticks(rotation=45)
+        plt.grid(True, alpha=0.3)
+        
+        output_path = os.path.join(self.config.VISUALIZATIONS_DIR, f'{title}_line.png')
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"    折线图已保存到: {output_path}")
+
+    def write_visualization_report(self):
+        """将可视化结果写入到feature_engineering.md文档"""
+        if self.visualization_suggestions is None:
+            raise ValueError("请先获取可视化建议")
+        
+        # 构建报告内容
+        report_content = "\n## 数据可视化结果\n\n"
+        report_content += "### 可视化建议\n\n"
+        
+        if self.visualization_suggestions:
+            for i, suggestion in enumerate(self.visualization_suggestions):
+                if not suggestion.get('recommended', True):
+                    continue
+                
+                chart_type = suggestion.get('chart_type', '未知')
+                title = suggestion.get('title', '无标题')
+                x_axis = suggestion.get('x_axis', '无')
+                y_axis = suggestion.get('y_axis', '无')
+                description = suggestion.get('description', '无描述')
+                
+                report_content += f"{i+1}. **{chart_type}** - {title}\n"
+                report_content += f"   - X轴: {x_axis}\n"
+                report_content += f"   - Y轴: {y_axis}\n"
+                report_content += f"   - 描述: {description}\n\n"
         else:
-            # 绘制整体趋势
-            plt.plot(self.data['销售日期'], self.data[target_col], marker='o')
+            report_content += "未获取到可视化建议\n\n"
         
-        plt.title(f'{target_col}的时间序列趋势', fontsize=16)
-        plt.xlabel('销售日期')
-        plt.ylabel(target_col)
-        plt.grid(True, alpha=0.3)
-        plt.legend()
-        plt.xticks(rotation=45)
+        # 写入到feature_engineering.md文件
+        report_path = "docs/api_docs/data_visualization.md"
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write(report_content)
         
-        output_path = os.path.join(self.config.VISUALIZATIONS_DIR, f'{target_col}_time_series.png')
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        print(f"时间序列图已保存到: {output_path}")
-    
-    def plot_categorical_comparison(self, categorical_col='产品类别', target_col='利润'):
-        """绘制类别型特征的比较图"""
-        if self.data is None:
-            raise ValueError("请先加载数据")
-        
-        plt.figure(figsize=(12, 8))
-        
-        # 箱线图
-        plt.subplot(1, 2, 1)
-        sns.boxplot(x=categorical_col, y=target_col, data=self.data, palette='Set2')
-        plt.title(f'{target_col}按{categorical_col}分布（箱线图）')
-        plt.xlabel(categorical_col)
-        plt.ylabel(target_col)
-        plt.xticks(rotation=45)
-        plt.grid(True, alpha=0.3)
-        
-        # 柱状图（均值）
-        plt.subplot(1, 2, 2)
-        mean_values = self.data.groupby(categorical_col)[target_col].mean().sort_values(ascending=False)
-        sns.barplot(x=mean_values.index, y=mean_values.values, palette='Set2')
-        plt.title(f'{target_col}按{categorical_col}均值分布（柱状图）')
-        plt.xlabel(categorical_col)
-        plt.ylabel(f'平均{target_col}')
-        plt.xticks(rotation=45)
-        plt.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        output_path = os.path.join(self.config.VISUALIZATIONS_DIR, f'{target_col}_by_{categorical_col}.png')
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        print(f"类别型特征比较图已保存到: {output_path}")
-    
-    def plot_scatter_matrix(self, cols=None):
-        """绘制散点矩阵"""
-        if self.data is None:
-            raise ValueError("请先加载数据")
-        
-        cols = cols or ['价格', '销量', '成本', '销售额', '利润', '利润率']
-        cols = [col for col in cols if col in self.data.columns]
-        
-        # 最多选择6个特征
-        cols = cols[:6]
-        
-        sns.pairplot(self.data[cols], diag_kind='kde', corner=True, palette='husl')
-        plt.suptitle('特征散点矩阵', y=1.02, fontsize=16)
-        
-        output_path = os.path.join(self.config.VISUALIZATIONS_DIR, 'scatter_matrix.png')
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        print(f"散点矩阵图已保存到: {output_path}")
-    
-    def plot_promotion_effect(self):
-        """绘制促销活动效果分析"""
-        if self.data is None:
-            raise ValueError("请先加载数据")
-        
-        if '促销活动' not in self.data.columns:
-            raise ValueError("数据中没有促销活动列")
-        
-        plt.figure(figsize=(15, 10))
-        
-        # 促销活动对销量的影响
-        plt.subplot(2, 2, 1)
-        sns.boxplot(x='促销活动', y='销量', data=self.data, palette='Set1')
-        plt.title('促销活动对销量的影响')
-        plt.grid(True, alpha=0.3)
-        
-        # 促销活动对利润的影响
-        plt.subplot(2, 2, 2)
-        sns.boxplot(x='促销活动', y='利润', data=self.data, palette='Set1')
-        plt.title('促销活动对利润的影响')
-        plt.grid(True, alpha=0.3)
-        
-        # 促销活动对利润率的影响
-        plt.subplot(2, 2, 3)
-        sns.boxplot(x='促销活动', y='利润率', data=self.data, palette='Set1')
-        plt.title('促销活动对利润率的影响')
-        plt.grid(True, alpha=0.3)
-        
-        # 按产品类别分析促销效果
-        plt.subplot(2, 2, 4)
-        sns.barplot(x='产品类别', y='利润', hue='促销活动', data=self.data, palette='Set1')
-        plt.title('各产品类别促销活动效果对比')
-        plt.xticks(rotation=45)
-        plt.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        output_path = os.path.join(self.config.VISUALIZATIONS_DIR, 'promotion_effect.png')
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        print(f"促销活动效果分析图已保存到: {output_path}")
-    
-    def plot_geographic_analysis(self):
-        """绘制地区销售分析"""
-        if self.data is None:
-            raise ValueError("请先加载数据")
-        
-        if '地区' not in self.data.columns:
-            raise ValueError("数据中没有地区列")
-        
-        plt.figure(figsize=(15, 8))
-        
-        # 各地区销售额对比
-        region_sales = self.data.groupby('地区')['销售额'].sum().sort_values(ascending=False)
-        
-        plt.subplot(1, 2, 1)
-        sns.barplot(x=region_sales.index, y=region_sales.values, palette='Set3')
-        plt.title('各地区销售额对比')
-        plt.xlabel('地区')
-        plt.ylabel('销售额')
-        plt.grid(True, alpha=0.3)
-        
-        # 各地区产品类别销售额分布
-        plt.subplot(1, 2, 2)
-        region_category_sales = self.data.groupby(['地区', '产品类别'])['销售额'].sum().unstack()
-        region_category_sales.plot(kind='bar', stacked=True, ax=plt.gca())
-        plt.title('各地区产品类别销售额分布')
-        plt.xlabel('地区')
-        plt.ylabel('销售额')
-        plt.legend(title='产品类别')
-        plt.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        output_path = os.path.join(self.config.VISUALIZATIONS_DIR, 'geographic_analysis.png')
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        print(f"地区销售分析图已保存到: {output_path}")
-    
-    def plot_feature_importance(self):
-        """绘制特征重要性图"""
-        if self.features_data is None:
-            raise ValueError("请先加载特征工程后的数据")
-        
-        from sklearn.ensemble import RandomForestRegressor
-        
-        # 分离特征和目标
-        X = self.features_data.drop('利润', axis=1)
-        y = self.features_data['利润']
-        
-        # 训练随机森林模型
-        rf = RandomForestRegressor(n_estimators=100, random_state=self.config.RANDOM_STATE)
-        rf.fit(X, y)
-        
-        # 获取特征重要性
-        feature_importance = pd.DataFrame({
-            '特征': X.columns,
-            '重要性': rf.feature_importances_
-        }).sort_values(by='重要性', ascending=False)
-        
-        plt.figure(figsize=(12, 8))
-        sns.barplot(x='重要性', y='特征', data=feature_importance, palette='viridis')
-        plt.title('特征重要性排序')
-        plt.xlabel('重要性得分')
-        plt.ylabel('特征')
-        plt.grid(True, alpha=0.3)
-        
-        output_path = os.path.join(self.config.VISUALIZATIONS_DIR, 'feature_importance.png')
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        print(f"特征重要性图已保存到: {output_path}")
+        print(f"\n可视化结果已写入到: {report_path}")
+        return report_path
     
     def run_all_visualizations(self):
         """运行所有可视化"""
@@ -289,32 +315,15 @@ class DataVisualizer:
         # 加载数据
         self.load_data()
         
-        # 1. 数值型特征分布
-        self.plot_numerical_distribution()
+        # 收集数据信息并获取可视化建议
+        self.collect_data_info()
+        self.get_visualization_suggestions()
         
-        # 2. 相关性热力图
-        self.plot_correlation_heatmap()
+        # 根据可视化建议生成图表
+        self.plot_from_suggestions()
         
-        # 3. 时间序列分析
-        self.plot_time_series(target_col='销售额')
-        self.plot_time_series(target_col='利润')
-        
-        # 4. 类别型特征比较
-        self.plot_categorical_comparison(categorical_col='产品类别', target_col='利润')
-        self.plot_categorical_comparison(categorical_col='地区', target_col='利润')
-        
-        # 5. 散点矩阵
-        self.plot_scatter_matrix()
-        
-        # 6. 促销活动效果分析
-        self.plot_promotion_effect()
-        
-        # 7. 地区销售分析
-        self.plot_geographic_analysis()
-        
-        # 8. 特征重要性
-        if self.features_data is not None:
-            self.plot_feature_importance()
+        # 将可视化结果写入文档
+        self.write_visualization_report()
         
         print("\n=== 数据可视化流程完成 ===")
 

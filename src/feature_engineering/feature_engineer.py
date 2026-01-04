@@ -93,10 +93,15 @@ class FeatureEngineer:
         print(f"\n数值型特征{method}缩放完成")
         return self.data
     
-    def select_features(self, target_col=None, method='rfecv', task_type='regression'):
+    def select_features(self):
         """特征选择，自动识别目标列"""
         if self.data is None:
             raise ValueError("请先加载数据")
+        
+        # 使用配置文件中的参数
+        target_col = self.config.TARGET_COL
+        method = self.config.FEATURE_SELECTION_METHOD
+        task_type = self.config.TASK_TYPE
         
         # 自动识别目标列
         if not target_col:
@@ -269,7 +274,36 @@ class FeatureEngineer:
         print(f"\n特征工程后的数据已保存到: {file_path}")
         return file_path
     
-    def run_pipeline(self, target_col=None):
+    def write_feature_engineering_report(self):
+        """将特征工程结果写入到文档"""
+        if self.X is None or self.y is None:
+            raise ValueError("请先进行特征工程处理")
+        
+        # 构建报告内容
+        report_content = "\n## 特征工程结果\n\n"
+        report_content += "### 处理后的数据信息\n\n"
+        report_content += f"- 数据形状: {self.X.shape[0]}行 × {self.X.shape[1]}列\n"
+        report_content += f"- 目标列: {self.y.name}\n"
+        report_content += f"- 选择的特征: {list(self.X.columns)}\n"
+        
+        # 添加特征重要性信息
+        report_content += "\n### 特征重要性\n\n"
+        report_content += "```\n"
+        # 这里我们可以添加特征重要性的具体数值
+        # 但由于feature_engineer.py中没有直接计算特征重要性
+        # 我们先只列出选择的特征
+        report_content += f"选择的特征列表: {list(self.X.columns)}\n"
+        report_content += "```\n"
+        
+        # 写入到feature_engineering.md文件
+        report_path = "docs/api_docs/feature_engineering.md"
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write(report_content)
+        
+        print(f"\n特征工程结果已写入到: {report_path}")
+        return report_path
+    
+    def run_pipeline(self):
         """运行完整的特征工程流程"""
         print("=== 开始特征工程流程 ===")
         
@@ -286,10 +320,13 @@ class FeatureEngineer:
         self.scale_numerical_features(method='standard')
         
         # 5. 特征选择
-        self.select_features(target_col=target_col, method=self.config.FEATURE_SELECTION_METHOD)
+        self.select_features()
         
         # 6. 保存特征工程后的数据
         self.save_features_data()
+        
+        # 7. 写入特征工程报告
+        self.write_feature_engineering_report()
         
         print("\n=== 特征工程流程完成 ===")
         return self.X, self.y

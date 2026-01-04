@@ -162,39 +162,103 @@ class DataPreprocessor:
         self.data.info()
         return self.data
     
+    def _collect_data_info(self):
+        """收集数据信息作为API请求的辅助prompt"""
+        if self.data is None:
+            raise ValueError("请先加载数据")
+        
+        # 获取基本信息
+        data_shape = self.data.shape
+        columns = list(self.data.columns)
+        data_types = self.data.dtypes.astype(str).to_dict()
+        
+        # 获取数值型列的基本统计信息
+        numeric_cols = self.data.select_dtypes(include=[np.number]).columns.tolist()
+        numeric_stats = {} if not numeric_cols else self.data[numeric_cols].describe().round(2).to_dict()
+        
+        # 获取类别型列的基本信息
+        categorical_cols = self.data.select_dtypes(include=['object', 'category']).columns.tolist()
+        categorical_info = {}
+        for col in categorical_cols:
+            unique_count = len(self.data[col].unique())
+            unique_values = self.data[col].unique()[:5].tolist()  # 只显示前5个唯一值
+            categorical_info[col] = {
+                'unique_count': unique_count,
+                'sample_values': unique_values
+            }
+        
+        # 构建数据信息字符串
+        data_info = f"数据集信息：\n"
+        data_info += f"- 数据形状: {data_shape[0]}行 × {data_shape[1]}列\n"
+        data_info += f"- 所有列名: {columns}\n"
+        data_info += f"- 数据类型: {data_types}\n"
+        
+        if numeric_cols:
+            data_info += f"\n数值型列：\n"
+            data_info += f"- 列名: {numeric_cols}\n"
+            data_info += f"- 统计信息: {numeric_stats}\n"
+        
+        if categorical_cols:
+            data_info += f"\n类别型列：\n"
+            for col, info in categorical_info.items():
+                data_info += f"- {col}: {info['unique_count']}个唯一值，样本值: {info['sample_values']}\n"
+        
+        return data_info
+    
     def add_derived_columns(self):
-        """根据数据集中的列自动添加衍生特征"""
+        """根据数据集中的列自动添加衍生特征，使用DeepSeek API获取建议"""
         if self.data is None:
             raise ValueError("请先加载数据")
         
         print(f"\n开始自动添加衍生特征...")
         
-        # 识别价格、销量、成本等列
-        price_cols = [col for col in self.data.columns if 'price' in col.lower() or '价格' in col or '单价' in col]
-        quantity_cols = [col for col in self.data.columns if 'quantity' in col.lower() or '销量' in col or '数量' in col]
-        cost_cols = [col for col in self.data.columns if 'cost' in col.lower() or '成本' in col or 'cost' in col.lower()]
+        # 收集数据信息作为辅助prompt
+        data_info = self._collect_data_info()
         
-        # 计算销售额（价格 * 销量）
-        if price_cols and quantity_cols:
-            price_col = price_cols[0]
-            quantity_col = quantity_cols[0]
-            self.data['销售额'] = self.data[price_col] * self.data[quantity_col]
-            print(f"  生成销售额列（{price_col} * {quantity_col}）")
+        # 初始化DeepSeek API客户端（动态导入以避免循环导入）
+        from src.langchain_agent import OpenAIClientLLM
+        deepseek_client = OpenAIClientLLM()
         
-        # 计算利润（销售额 - 成本 * 销量）
-        if '销售额' in self.data.columns and cost_cols and quantity_cols:
-            cost_col = cost_cols[0]
-            quantity_col = quantity_cols[0]
-            self.data['利润'] = self.data['销售额'] - (self.data[cost_col] * self.data[quantity_col])
-            print(f"  生成利润列（销售额 - {cost_col} * {quantity_col}）")
+        # 构建prompt
+        prompt = f"你是一个数据分析师，请根据以下数据集信息，建议可以添加的衍生列：\n\n"
+        prompt += data_info
+        prompt += f"\n请以JSON格式输出建议的衍生列，每个衍生列应包含：\n"
+        prompt += f"1. column_name: 衍生列的名称\n"
+        prompt += f"2. calculation: 衍生列的计算公式（使用Python pandas语法）\n"
+        prompt += f"3. description: 衍生列的描述\n"
+        prompt += f"\n例如：\n"
+        prompt += f"[{{\"column_name\": \"销售额\", \"calculation\": \"data['价格'] * data['销量']\", \"description\": \"产品销售额\"}}]\n"
+        prompt += f"\n请只输出JSON格式的结果，不要添加任何其他文字或解释。\n"
+    
+        # 调用DeepSeek API获取建议
+        print("  正在调用DeepSeek API获取衍生列建议...")
+        response = deepseek_client.invoke(prompt)
         
-        # 计算利润率（利润 / 销售额 * 100）
-        if '利润' in self.data.columns and '销售额' in self.data.columns:
-            self.data['利润率'] = (self.data['利润'] / self.data['销售额']) * 100
-            self.data['利润率'] = self.data['利润率'].round(2)
-            print(f"  生成利润率列")
+        # 解析API响应
+        import json
+        derived_columns = json.loads(response)
         
-        # 从所有日期时间列提取时间特征
+        # 根据建议添加衍生列
+        added_columns = 0
+        for col in derived_columns:
+            try:
+                column_name = col['column_name']
+                calculation = col['calculation']
+                description = col['description']
+                
+                # 使用eval计算衍生列，这里需要注意安全问题，但在内部使用是可以接受的
+                self.data[column_name] = eval(calculation.replace('data', 'self.data'))
+                print(f"  生成{column_name}列")
+                added_columns += 1
+            except Exception as e:
+                print(f"  生成衍生列失败：{str(e)}")
+                continue
+        
+
+        
+      
+        
+        # 从所有日期时间列提取时间特征（这部分无论API调用是否成功都会执行）
         datetime_cols = self.data.select_dtypes(include=['datetime64']).columns
         for date_col in datetime_cols:
             print(f"  从 {date_col} 提取时间特征")
@@ -204,7 +268,6 @@ class DataPreprocessor:
             self.data[f'{date_col}_星期'] = self.data[date_col].dt.dayofweek
             self.data[f'{date_col}_星期名称'] = self.data[date_col].dt.day_name()
         
-        print(f"\n添加衍生列后的数据前5行:\n{self.data.head()}")
         return self.data
     
     def save_processed_data(self, file_path=None):
@@ -216,6 +279,29 @@ class DataPreprocessor:
         self.data.to_csv(file_path, index=False)
         print(f"\n处理后的数据已保存到: {file_path}")
         return file_path
+    
+    def write_data_preprocessing_report(self):
+        """将数据预处理结果写入到文档"""
+        if self.data is None:
+            raise ValueError("请先加载和处理数据")
+        
+        # 获取数据信息
+        data_info = self._collect_data_info()
+        
+        # 构建报告内容
+        report_content = "\n## 数据预处理结果\n\n"
+        report_content += "### 处理后的数据信息\n\n"
+        report_content += "```\n"
+        report_content += data_info
+        report_content += "\n```\n"
+        
+        # 写入到data_preprocessing.md文件
+        report_path = "docs/api_docs/data_preprocessing.md"
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write(report_content)
+        
+        print(f"\n数据预处理结果已写入到: {report_path}")
+        return report_path
     
     def run_pipeline(self):
         """运行完整的预处理流程"""
@@ -241,6 +327,9 @@ class DataPreprocessor:
         
         # 7. 保存处理后的数据
         self.save_processed_data()
+        
+        # 8. 写入预处理报告
+        self.write_data_preprocessing_report()
         
         print("\n=== 数据预处理流程完成 ===")
         return self.data

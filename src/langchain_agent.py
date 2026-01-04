@@ -37,10 +37,25 @@ class OpenAIClientLLM(BaseLanguageModel):
     api_key: str
     
     def __init__(self,
-                 api_key: str='your_api_key_here',
-                 base_url: str = "https://api.deepseek.com/v1",
-                 model: str = "deepseek-chat",
-                 temperature: float = 0.1):
+                 api_key: str=None,
+                 base_url: str = None,
+                 model: str = None,
+                 temperature: float = None):
+        # 加载.env文件
+        from dotenv import load_dotenv
+        import os
+        load_dotenv()
+        
+        # 从环境变量读取配置，参数优先级：显式参数 > 环境变量 > 默认值
+        if api_key is None:
+            api_key = os.getenv("DEEPSEEK_API_KEY")
+        if base_url is None:
+            base_url = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com/v1")
+        if model is None:
+            model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+        if temperature is None:
+            temperature = float(os.getenv("DEEPSEEK_TEMPERATURE", "0.1"))
+        
         # 初始化OpenAI客户端，只传递必要参数，不接受任何额外参数
         client = OpenAI(
             api_key=api_key,
@@ -66,7 +81,8 @@ class OpenAIClientLLM(BaseLanguageModel):
                 "model": self.model,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": self.temperature,
-                "stop": stop
+                "stop": stop,
+                "max_tokens": 8192  # 设置API允许的最大token限制，避免内容被截断
             }
                 
             response = self.client.chat.completions.create(**api_kwargs)
@@ -82,11 +98,13 @@ class OpenAIClientLLM(BaseLanguageModel):
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": self.temperature,
-            "stop": stop
+            "stop": stop,
+            "max_tokens": 8192  # 设置API允许的最大token限制，避免内容被截断
         }
-            
+        
         response = self.client.chat.completions.create(**api_kwargs)
         return response.choices[0].message.content
+        
     
     def generate_prompt(self,
                        prompts: List[Dict[str, Any]],
@@ -197,6 +215,8 @@ class LangChainDataAnalysisAgent:
         self.scenario_analyzer = None
         self.vector_db = None
         self.embeddings = None
+        self.use_real_llm = False
+        self.api_key = ''
         
         # 初始化各个模块
         self._initialize_modules()
@@ -204,12 +224,10 @@ class LangChainDataAnalysisAgent:
         # 分析数据集结构
         self.analyze_dataset()
         
-        # 初始化向量库
+        # 初始化向量库，用于存储和检索数据分析框架API
         self._initialize_vector_db()
         
-        # 生成动态提示词
-        self.prompt = self.generate_dynamic_prompt()
-        
+
         # 创建工具列表
         self.tools = self._create_tools()
     
@@ -241,36 +259,73 @@ class LangChainDataAnalysisAgent:
         
         # 从文件加载初始文档
         initial_documents = []
-        api_docs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'docs', 'api_docs')
+        api_docs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),  'api')
         
         # 定义文档元数据映射
         doc_metadata = {
-            'data_preprocessing.md': {"category": "数据预处理", "api_name": "data_preprocessing"},
-            'feature_engineering.md': {"category": "特征工程", "api_name": "feature_engineering"},
-            'data_visualization.md': {"category": "数据可视化", "api_name": "data_visualization"},
-            'regression_analysis.md': {"category": "实证分析", "api_name": "regression_analysis"},
-            'scenario_analysis.md': {"category": "预案性分析", "api_name": "scenario_analysis"}
+            '【案例】母婴市场销售情况分析.pdf': {"category": "市场销售数据分析框架", "api_name": "数据分析框架"},
+            '北京高档酒店价格影响因素分析.pdf': {"category": "价格预测数据分析框架", "api_name": "数据分析框架"},
+            '健身平台会员分析.pdf': {"category": "平台会员分析框架", "api_name": "数据分析框架"},
+            '评论数据产品口碑分析.pdf': {"category": "产品口碑分析框架", "api_name": "数据分析框架"},
+            '商品库存分析.pdf': {"category": "商品库存分析框架", "api_name": "数据分析框架"},
+            '信用卡用户画像分析.pdf': {"category": "信用卡用户画像分析框架", "api_name": "数据分析框架"},
+            '用python对微信好友进行分析 上午10.19.25.pdf': {"category": "微信好友分析框架", "api_name": "数据分析框架"},
+            '员工流失建模与预测实例.pdf': {"category": "员工流失预测分析框架", "api_name": "数据分析框架"},
+            '支付宝营销策略效果分析.pdf': {"category": "营销策略分析框架", "api_name": "数据分析框架"},
+            'Airbnb产品数据分析.pdf': {"category": "电子产品分析框架", "api_name": "数据分析框架"},
+            'python数据分析告诉你，为什么你的外卖总是这么慢.pdf': {"category": "外卖分析框架", "api_name": "数据分析框架"},
+
         }
         
         # 读取所有API文档文件
         for filename, metadata in doc_metadata.items():
             file_path = os.path.join(api_docs_dir, filename)
             if os.path.exists(file_path):
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
+                try:
+                    if filename.endswith('.pdf'):
+                        # 使用PyPDF2读取PDF文件
+                        from PyPDF2 import PdfReader
+                        reader = PdfReader(file_path)
+                        content = ""
+                        for page in reader.pages:
+                            content += page.extract_text() or ""
+                    else:
+                        # 读取普通文本文件
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                    
                     # 创建初始文档对象
                     document = Document(page_content=content, metadata=metadata)
                     # 将文档分割成小块
                     doc_chunks = text_splitter.split_documents([document])
                     # 添加到初始文档列表
                     initial_documents.extend(doc_chunks)
-                print(f"已加载并分割文档: {filename} (共 {len(doc_chunks)} 个块)")
+                    print(f"已加载并分割文档: {filename} (共 {len(doc_chunks)} 个块)")
+                except Exception as e:
+                    print(f"警告: 读取文档时出错 {filename}: {str(e)}")
             else:
                 print(f"警告: 文档文件不存在: {file_path}")
         
         # 创建内存向量库（不保存到磁盘）
-        self.vector_db = FAISS.from_documents(initial_documents, self.embeddings)
-        print(f"向量库创建成功（内存模式），共加载 {len(initial_documents)} 个文档块")
+        if initial_documents:
+            self.vector_db = FAISS.from_documents(initial_documents, self.embeddings)
+            print(f"向量库创建成功（内存模式），共加载 {len(initial_documents)} 个文档块")
+        else:
+            # 如果没有文档，创建一个空的向量库
+            from langchain_community.docstore.in_memory import InMemoryDocstore
+            from langchain_community.vectorstores.utils import DistanceStrategy
+            import faiss
+            
+            # 创建一个空的FAISS索引
+            index = faiss.IndexFlatL2(768)  # 假设使用768维的嵌入向量
+            self.vector_db = FAISS(
+                embedding_function=self.embeddings,
+                index=index,
+                docstore=InMemoryDocstore({}),
+                index_to_docstore_id={},
+                distance_strategy=DistanceStrategy.EUCLIDEAN_DISTANCE
+            )
+            print("向量库创建成功（内存模式），但未加载任何文档块")
         
 
     
@@ -311,159 +366,7 @@ class LangChainDataAnalysisAgent:
         print(f"数据集分析完成: {dataset_info}")
         return dataset_info
     
-    def generate_dynamic_prompt(self):
-        """根据数据集特征生成动态提示词，选择合适的分析模板"""
-        if not hasattr(self, 'dataset_info'):
-            self.analyze_dataset()
-        
-        dataset_info = self.dataset_info
-        
-        # 使用RAG检索相关数据分析API信息
-        query = f"针对数据集{dataset_info['shape']}进行数据分析，包含{dataset_info['columns']}列，其中数值型列{dataset_info['numeric_cols']}，类别型列{dataset_info['categorical_cols']}，日期时间列{dataset_info['datetime_cols']}"
-        rag_info = self.retrieve_rag_info(query) if hasattr(self, 'retrieve_rag_info') and self.vector_db else ""
-        
-        # 分析数据集类型
-        has_time_series = len(dataset_info['datetime_cols']) > 0
-        has_numeric = len(dataset_info['numeric_cols']) > 0
-        has_categorical = len(dataset_info['categorical_cols']) > 0
-        has_target = len(dataset_info['possible_target_cols']) > 0
-        
-        # 选择合适的提示词模板
-        if has_time_series:
-            # 时间序列数据模板
-            prompt_template = f"""你是一个专业的数据分析助手，需要根据以下时间序列数据集信息完成数据分析任务：
-        
-数据集基本信息：
-- 数据形状：{dataset_info['shape']}
-- 列名：{', '.join(dataset_info['columns'])}
-- 数值型列：{', '.join(dataset_info['numeric_cols']) if dataset_info['numeric_cols'] else '无'}
-- 类别型列：{', '.join(dataset_info['categorical_cols']) if dataset_info['categorical_cols'] else '无'}
-- 日期时间列：{', '.join(dataset_info['datetime_cols']) if dataset_info['datetime_cols'] else '无'}
-- 可能的目标列：{', '.join(dataset_info['possible_target_cols']) if dataset_info['possible_target_cols'] else '无'}
-        
-以下是通过RAG检索到的相关数据分析API信息：
-{rag_info}
-        
-请根据以下工具列表和数据集信息，选择合适的工具完成数据分析任务：
-
-1. 数据预处理：对原始数据进行预处理，包括处理缺失值、异常值、转换数据类型、添加衍生特征等。
-2. 特征工程：对预处理后的数据进行特征工程，包括编码分类特征、缩放数值特征、选择重要特征等。
-3. 数据可视化：生成各种数据可视化图表，包括分布直方图、相关性热图、时间序列图等。
-4. 实证分析：进行实证分析，包括描述性统计、相关性分析、假设检验、回归建模等。
-5. 预案性分析：根据数据集特征进行相应的场景分析。
-6. 完整数据分析流程：运行完整的数据分析流程。
-7. RAG检索：从向量库中检索相关的数据分析报告API信息，帮助选择合适的分析方法。
-
-针对时间序列数据，建议关注以下分析方向：
-- 时间序列趋势分析
-- 季节性模式识别
-- 周期性分析
-- 预测建模
-- 异常检测
-
-请确保分析结果能够提供有价值的洞察和建议。"""
-        
-        elif has_categorical and has_numeric:
-            # 混合数据类型模板
-            prompt_template = f"""你是一个专业的数据分析助手，需要根据以下混合类型数据集信息完成数据分析任务：
-        
-数据集基本信息：
-- 数据形状：{dataset_info['shape']}
-- 列名：{', '.join(dataset_info['columns'])}
-- 数值型列：{', '.join(dataset_info['numeric_cols']) if dataset_info['numeric_cols'] else '无'}
-- 类别型列：{', '.join(dataset_info['categorical_cols']) if dataset_info['categorical_cols'] else '无'}
-- 日期时间列：{', '.join(dataset_info['datetime_cols']) if dataset_info['datetime_cols'] else '无'}
-- 可能的目标列：{', '.join(dataset_info['possible_target_cols']) if dataset_info['possible_target_cols'] else '无'}
-        
-以下是通过RAG检索到的相关数据分析API信息：
-{rag_info}
-        
-请根据以下工具列表和数据集信息，选择合适的工具完成数据分析任务：
-
-1. 数据预处理：对原始数据进行预处理，包括处理缺失值、异常值、转换数据类型、添加衍生特征等。
-2. 特征工程：对预处理后的数据进行特征工程，包括编码分类特征、缩放数值特征、选择重要特征等。
-3. 数据可视化：生成各种数据可视化图表，包括分布直方图、相关性热图、时间序列图等。
-4. 实证分析：进行实证分析，包括描述性统计、相关性分析、假设检验、回归建模等。
-5. 预案性分析：根据数据集特征进行相应的场景分析。
-6. 完整数据分析流程：运行完整的数据分析流程。
-7. RAG检索：从向量库中检索相关的数据分析报告API信息，帮助选择合适的分析方法。
-
-针对混合类型数据，建议关注以下分析方向：
-- 不同类别间的数值差异分析
-- 特征间的相关性分析
-- 分类建模
-- 聚类分析
-- 特征重要性评估
-
-请确保分析结果能够提供有价值的洞察和建议。"""
-        
-        elif has_numeric and not has_categorical:
-            # 纯数值数据模板
-            prompt_template = f"""你是一个专业的数据分析助手，需要根据以下数值型数据集信息完成数据分析任务：
-        
-数据集基本信息：
-- 数据形状：{dataset_info['shape']}
-- 列名：{', '.join(dataset_info['columns'])}
-- 数值型列：{', '.join(dataset_info['numeric_cols']) if dataset_info['numeric_cols'] else '无'}
-- 类别型列：{', '.join(dataset_info['categorical_cols']) if dataset_info['categorical_cols'] else '无'}
-- 日期时间列：{', '.join(dataset_info['datetime_cols']) if dataset_info['datetime_cols'] else '无'}
-- 可能的目标列：{', '.join(dataset_info['possible_target_cols']) if dataset_info['possible_target_cols'] else '无'}
-        
-以下是通过RAG检索到的相关数据分析API信息：
-{rag_info}
-        
-请根据以下工具列表和数据集信息，选择合适的工具完成数据分析任务：
-
-1. 数据预处理：对原始数据进行预处理，包括处理缺失值、异常值、转换数据类型、添加衍生特征等。
-2. 特征工程：对预处理后的数据进行特征工程，包括编码分类特征、缩放数值特征、选择重要特征等。
-3. 数据可视化：生成各种数据可视化图表，包括分布直方图、相关性热图、时间序列图等。
-4. 实证分析：进行实证分析，包括描述性统计、相关性分析、假设检验、回归建模等。
-5. 预案性分析：根据数据集特征进行相应的场景分析。
-6. 完整数据分析流程：运行完整的数据分析流程。
-7. RAG检索：从向量库中检索相关的数据分析报告API信息，帮助选择合适的分析方法。
-
-针对纯数值数据，建议关注以下分析方向：
-- 数值分布分析
-- 变量间的相关性分析
-- 回归建模
-- 降维分析
-- 异常检测
-
-请确保分析结果能够提供有价值的洞察和建议。"""
-        
-        else:
-            # 默认模板
-            prompt_template = f"""你是一个专业的数据分析助手，需要根据以下数据集信息完成数据分析任务：
-        
-数据集基本信息：
-- 数据形状：{dataset_info['shape']}
-- 列名：{', '.join(dataset_info['columns'])}
-- 数值型列：{', '.join(dataset_info['numeric_cols']) if dataset_info['numeric_cols'] else '无'}
-- 类别型列：{', '.join(dataset_info['categorical_cols']) if dataset_info['categorical_cols'] else '无'}
-- 日期时间列：{', '.join(dataset_info['datetime_cols']) if dataset_info['datetime_cols'] else '无'}
-- 可能的目标列：{', '.join(dataset_info['possible_target_cols']) if dataset_info['possible_target_cols'] else '无'}
-        
-以下是通过RAG检索到的相关数据分析API信息：
-{rag_info}
-        
-请根据以下工具列表和数据集信息，选择合适的工具完成数据分析任务：
-
-1. 数据预处理：对原始数据进行预处理，包括处理缺失值、异常值、转换数据类型、添加衍生特征等。
-2. 特征工程：对预处理后的数据进行特征工程，包括编码分类特征、缩放数值特征、选择重要特征等。
-3. 数据可视化：生成各种数据可视化图表，包括分布直方图、相关性热图、时间序列图等。
-4. 实证分析：进行实证分析，包括描述性统计、相关性分析、假设检验、回归建模等。
-5. 预案性分析：根据数据集特征进行相应的场景分析。
-6. 完整数据分析流程：运行完整的数据分析流程，包括数据预处理、特征工程、数据可视化、实证分析和预案性分析，并生成综合报告。
-7. RAG检索：从向量库中检索相关的数据分析报告API信息，帮助选择合适的分析方法。
-
-请根据数据集的具体情况，选择合适的工具和参数进行分析。例如：
-- 如果有日期时间列，可以考虑添加时间相关的衍生特征
-- 如果有多个数值型列，可以进行相关性分析和回归建模
-- 如果有类别型列，可以进行分类特征分析和编码
-
-请确保分析结果能够提供有价值的洞察和建议。"""
-        
-        return prompt_template
+    
     
     def _create_tools(self):
         """创建langchain工具列表"""
@@ -522,6 +425,7 @@ class LangChainDataAnalysisAgent:
         self.preprocessor.remove_outliers()
         self.preprocessor.add_derived_columns()
         self.preprocessor.save_processed_data()
+        self.preprocessor.write_data_preprocessing_report()
         
         print("=== 数据预处理完成 ===")
         return "数据预处理已完成，预处理后的数据已保存到: " + self.config.PROCESSED_DATA_FILE
@@ -533,8 +437,9 @@ class LangChainDataAnalysisAgent:
         self.feature_engineer.add_time_based_features()
         self.feature_engineer.encode_categorical_features(method='onehot')
         self.feature_engineer.scale_numerical_features(method='standard')
-        self.feature_engineer.select_features(target_col=target_col, method=self.config.FEATURE_SELECTION_METHOD)
+        self.feature_engineer.select_features()
         self.feature_engineer.save_features_data()
+        self.feature_engineer.write_feature_engineering_report()
         
         print("=== 特征工程完成 ===")
         return "特征工程已完成，特征工程后的数据已保存到: " + self.config.FEATURES_DATA_FILE
@@ -542,10 +447,86 @@ class LangChainDataAnalysisAgent:
     def run_visualization(self):
         """运行数据可视化"""
         print("=== 开始数据可视化 ===")
+        
+        import types
+        
+        # 定义一个替换函数，用于修改plot_from_suggestions方法
+        def patched_plot_from_suggestions(self_visualizer):
+            """修补后的plot_from_suggestions方法，跳过不存在的可视化方法"""
+            if self_visualizer.visualization_suggestions is None:
+                print("未获取到可视化建议，使用默认可视化流程")
+                return
+            
+            print(f"\n根据可视化建议生成图表...")
+            
+            # 为不同图表类型分配处理函数，只保留存在的方法
+            chart_handlers = {
+                'histogram': self_visualizer._plot_histogram,
+                'scatter': self_visualizer._plot_scatter,
+                'boxplot': self_visualizer._plot_boxplot,
+                'bar': self_visualizer._plot_bar,
+                'line': self_visualizer._plot_line
+                # 移除不存在的方法引用: 'heatmap', 'pairplot', 'feature_importance'
+            }
+            
+            # 跟踪已生成的图表，避免重复
+            self_visualizer.generated_charts = set()
+            
+            for suggestion in self_visualizer.visualization_suggestions:
+                try:
+                    # 只生成推荐的图表
+                    if not suggestion.get('recommended', True):
+                        continue
+                    
+                    chart_type = suggestion.get('chart_type')
+                    title = suggestion.get('title')
+                    x_axis = suggestion.get('x_axis')
+                    y_axis = suggestion.get('y_axis')
+                    description = suggestion.get('description')
+                    
+                    # 检查必要参数
+                    if not chart_type or not title:
+                        continue
+                    
+                    # 检查列是否存在
+                    if x_axis and x_axis not in self_visualizer.data.columns:
+                        print(f"跳过{title}: X轴字段{x_axis}不存在")
+                        continue
+                    if y_axis and y_axis not in self_visualizer.data.columns:
+                        print(f"跳过{title}: Y轴字段{y_axis}不存在")
+                        continue
+                    
+                    # 生成图表唯一标识
+                    chart_id = f"{chart_type}_{x_axis or 'none'}_{y_axis or 'none'}"
+                    if chart_id in self_visualizer.generated_charts:
+                        continue
+                    self_visualizer.generated_charts.add(chart_id)
+                    
+                    print(f"  生成图表: {title}")
+                    
+                    # 根据图表类型调用相应的处理函数
+                    if chart_type in chart_handlers:
+                        if chart_type in ['histogram', 'scatter', 'boxplot', 'bar', 'line']:
+                            chart_handlers[chart_type](x_axis, y_axis, title, description)
+                        else:
+                            chart_handlers[chart_type]()
+                    else:
+                        print(f"  不支持的图表类型: {chart_type}")
+                        
+                except Exception as e:
+                    print(f"  生成图表时出错 {suggestion.get('title', '未知')}: {e}")
+                    continue
+        
+        # 替换visualizer的plot_from_suggestions方法
+        self.visualizer.plot_from_suggestions = types.MethodType(patched_plot_from_suggestions, self.visualizer)
+        
+        # 执行可视化流程
+  
         self.visualizer.run_all_visualizations()
         
         print("=== 数据可视化完成 ===")
         return "数据可视化已完成，所有图表已保存到: " + self.config.VISUALIZATIONS_DIR
+ 
     
     def run_empirical_analysis(self):
         """运行实证分析"""
@@ -626,139 +607,199 @@ class LangChainDataAnalysisAgent:
         
 
     def generate_report_with_custom_prompt(self):
-        """使用自定义prompt生成综合分析报告"""
+       
         print("=== 开始使用自定义prompt生成综合报告 ===")
         
         report_file = self.config.ANALYSIS_REPORT
         
-        # 收集所有分析结果的信息
-        analysis_results = {
-            "data_overview": {
-                "source": self.config.RAW_DATA_FILE,
-                "shape": self.dataset_info.get('shape', '未知') if hasattr(self, 'dataset_info') else '未知',
-                "columns": self.dataset_info.get('columns', []) if hasattr(self, 'dataset_info') else []
-            },
-            "preprocessing": {
-                "steps": ["加载数据", "处理缺失值", "转换数据类型", "检测和处理异常值", "添加衍生列", "保存预处理后的数据"],
-                "result_file": self.config.PROCESSED_DATA_FILE
-            },
-            "feature_engineering": {
-                "steps": ["编码分类特征", "缩放数值特征", "选择重要特征", "添加时间特征", "保存特征工程后的数据"],
-                "result_file": self.config.FEATURES_DATA_FILE
-            },
-            "visualization": {
-                "chart_types": ["数值型特征分布", "相关性热图", "时间序列分析", "分类特征比较", "特征散点图", "促销活动效果", "地区分布"],
-                "result_dir": self.config.VISUALIZATIONS_DIR
-            },
-            "empirical_analysis": {
-                "content": ["描述性统计分析", "相关性分析", "假设检验", "回归模型训练与评估", "模型解释"],
-                "result_dir": self.config.RESULTS_DIR
-            },
-            "scenario_analysis": {
-                "content": ["销售增长场景", "价格变化场景", "成本降低场景", "组合场景"],
-                "result_dir": self.config.RESULTS_DIR
-            }
-        }
+        # 定义API文档目录
+        api_docs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'docs', 'api_docs')
+        os.makedirs(api_docs_dir, exist_ok=True)
         
-        # 收集实证分析和预案性分析的实际结果数据
-        empirical_data = ""
-        scenario_data = ""
+        # 初始化API文档内容
+        api_docs_content = ""
         
-        # 收集实证分析数据
-        if hasattr(self.analyzer, 'results'):
-            empirical_data = f"\n### 实证分析实际结果\n\n"
-            empirical_data += "#### 模型性能比较\n"
-            empirical_data += self.analyzer.results.to_markdown(index=False) + "\n"
-            
-        # 收集预案性分析数据
-        if hasattr(self.scenario_analyzer, 'baseline'):
-            scenario_data = f"\n### 预案性分析实际结果\n\n"
-            
-            # 基线数据
-            scenario_data += "#### 当前基线数据\n"
-            scenario_data += f"- 平均价格: {self.scenario_analyzer.baseline['平均价格']:.2f}\n"
-            scenario_data += f"- 平均销量: {self.scenario_analyzer.baseline['平均销量']:.2f}\n"
-            scenario_data += f"- 平均成本: {self.scenario_analyzer.baseline['平均成本']:.2f}\n"
-            scenario_data += f"- 平均利润: {self.scenario_analyzer.baseline['平均利润']:.2f}\n"
-            scenario_data += f"- 总销售额: {self.scenario_analyzer.baseline['总销售额']:.2f}\n"
-            scenario_data += f"- 总利润: {self.scenario_analyzer.baseline['总利润']:.2f}\n"
-            
-            # 销售增长场景
-            sales_results = self.scenario_analyzer.sales_results if hasattr(self.scenario_analyzer, 'sales_results') else None
-            if sales_results is not None:
-                scenario_data += "\n#### 销售增长场景\n"
-                scenario_data += sales_results.to_markdown(index=False) + "\n"
-            
-            # 价格变化场景
-            price_results = self.scenario_analyzer.price_results if hasattr(self.scenario_analyzer, 'price_results') else None
-            if price_results is not None:
-                scenario_data += "\n#### 价格变化场景\n"
-                scenario_data += price_results.to_markdown(index=False) + "\n"
-            
-            # 成本降低场景
-            cost_results = self.scenario_analyzer.cost_results if hasattr(self.scenario_analyzer, 'cost_results') else None
-            if cost_results is not None:
-                scenario_data += "\n#### 成本降低场景\n"
-                scenario_data += cost_results.to_markdown(index=False) + "\n"
-            
-            # 组合场景
-            combined_results = self.scenario_analyzer.combined_results if hasattr(self.scenario_analyzer, 'combined_results') else None
-            if combined_results is not None:
-                scenario_data += "\n#### 组合场景\n"
-                scenario_data += combined_results.to_markdown(index=False) + "\n"
+        # 定义报告文件优先级和名称映射
+        report_files = [
+            ('数据预处理报告', 'data_preprocessing.md'),
+            ('特征工程报告', 'feature_engineering.md'),
+            ('数据可视化报告', 'data_visualization.md'),
+            ('回归分析报告', 'regression_analysis.md'),
+            ('场景分析报告', 'scenario_analysis_report.md')
+        ]
         
-        # 构建自定义prompt
-        custom_prompt = f"""请根据以下数据分析结果生成一份专业的综合数据分析报告：
+        # 读取每个报告文件的内容
+        for report_name, filename in report_files:
+            file_path = os.path.join(api_docs_dir, filename)
+            if os.path.exists(file_path):
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read().strip()
+                        if content:
+                            api_docs_content += f"\n\n### {report_name}\n\n"
+                            api_docs_content += content
+                except Exception as e:
+                    print(f"读取{report_name}时出错: {e}")
+        
+        # 获取生成的可视化图片列表
+        visualizations_dir = "results/visualizations"
+        visualization_files = []
+        if os.path.exists(visualizations_dir):
+            visualization_files = [f for f in os.listdir(visualizations_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg', '.svg'))]
+        
+        # 构建可视化图片信息字符串
+        visualization_info = ""
+        if visualization_files:
+            visualization_info = "\n## 可用可视化图片\n"
+            visualization_info += "以下是已生成的可视化图片，可以在报告中适当位置引用：\n"
+            for img_file in visualization_files:
+                # 提取图片描述（从文件名中生成）
+                img_desc = img_file.replace('_', ' ').replace('.png', '').replace('.jpg', '').replace('.jpeg', '').replace('.svg', '')
+                visualization_info += f"- 图片路径：{os.path.join(visualizations_dir, img_file)}，描述：{img_desc}\n"
+        
+        # 获取最相似的数据分析框架API作为辅助提示词
+        framework_query = "请提供完整的数据分析框架API，用于生成专业的数据分析报告"
+        framework_info = self.retrieve_rag_info(framework_query) if hasattr(self, 'retrieve_rag_info') and self.vector_db else ""
+        
+        # 构建第一部分prompt：框架API、报告结构和基本要求
+        prompt_part1 = f"""请根据以下推荐的数据分析框架API和报告结构要求，生成一份专业综合数据分析报告的基础框架和整体规划：
 
-## 数据分析结果概览
+## 推荐的数据分析框架API
 
-### 数据概况
-- 数据来源: {analysis_results['data_overview']['source']}
-- 数据形状: {analysis_results['data_overview']['shape']}
-- 数据列: {', '.join(analysis_results['data_overview']['columns'])}
+{framework_info}
 
-### 数据预处理
-- 预处理步骤: {', '.join(analysis_results['preprocessing']['steps'])}
-- 预处理结果文件: {analysis_results['preprocessing']['result_file']}
 
-### 特征工程
-- 特征工程步骤: {', '.join(analysis_results['feature_engineering']['steps'])}
-- 特征工程结果文件: {analysis_results['feature_engineering']['result_file']}
+## 报告结构要求
+1. **摘要**：简明扼要地概述分析目的、主要发现和核心建议（1-2页）
+2. **数据基础**：介绍数据来源、结构和主要特征
+3. **分析方法**：概述所采用的分析方法和技术路线
+4. **五大分析过程详解**：
+   - 数据预处理
+   - 特征工程
+   - 数据可视化
+   - 实证分析
+   - 预案性分析
+5. **关键洞察**：高亮显示从所有分析中得出的最重要发现（使用加粗或表格形式）
+6. **建议与行动方案**：基于分析结果提供具体、可执行的建议，并按优先级排序
+7. **局限性与未来工作**：讨论分析的局限性和潜在的改进方向
+8. **结论**：总结分析的主要价值和贡献
+9. **补充分析**：可以在报告中添加一些原理和公式，以帮助读者更好地理解分析过程
 
-### 数据可视化
-- 可视化图表类型: {', '.join(analysis_results['visualization']['chart_types'])}
-- 可视化结果目录: {analysis_results['visualization']['result_dir']}
+## 报告撰写基本要求
+1. 语言专业但简洁明了，避免冗余和重复
+2. 突出数据驱动的洞察和发现，使用具体数据支持结论
+3. 建议要具体、可操作，并说明预期影响
+4. 必须包含实际分析结果中的具体数据，不得用占位符替代
+5. 使用清晰的标题层级和列表结构，确保报告易于导航
+6. 重点内容可使用加粗或列表形式突出显示
+7. 确保报告逻辑连贯，从数据到洞察再到建议形成完整闭环
+8. 每个分点的字数不能太少，至少要500字左右
 
-### 实证分析
-- 分析内容: {', '.join(analysis_results['empirical_analysis']['content'])}
-- 分析结果目录: {analysis_results['empirical_analysis']['result_dir']}
+请为这份专业的综合数据分析报告生成详细的大纲和各部分的初步内容框架，包括报告的整体结构、各章节的主要内容要点和撰写思路。"""
+        
+        # 构建第二部分prompt：详细分析内容、可视化和具体要求
+        prompt_part2 = f"""现在，请根据以下详细的数据分析结果、可用的可视化图片和五大分析过程的具体要求，完成刚才规划的综合数据分析报告的完整内容：
 
-### 预案性分析
-- 分析内容: {', '.join(analysis_results['scenario_analysis']['content'])}
-- 分析结果目录: {analysis_results['scenario_analysis']['result_dir']}
+## 各阶段详细分析报告
 
-{empirical_data}
-{scenario_data}
+以下是数据分析各阶段的详细报告内容：
 
-## 报告要求
-1. 报告结构清晰，包含标题、摘要、主要部分和结论
-2. 每个部分应有详细的分析和解释
-3. 突出关键发现和洞察
-4. 提供具体的业务建议
-5. 语言专业但易于理解
-6. 报告中必须包含上述实际的分析结果数据，不能用字母代替真实数值
-请生成一份完整的Markdown格式的综合数据分析报告。"""
+{api_docs_content}
+{visualization_info}
+
+## 可视化图片详细要求
+1. 在报告中适当位置插入相关可视化图片，使用Markdown图片格式：![图片描述](image_path)
+2. **所有图片描述必须使用 <center> 标签包裹，确保在PDF中居中显示，格式为：![图片描述](image_path)<center>图1：图片描述</center>
+3. **必须使用实际生成的图片**，不要使用占位符
+4. 从可用可视化图片列表中选择合适的图片插入到报告的对应部分
+5. **数据预处理**部分：可包含数据分布、缺失值可视化、异常值检测图表等
+6. **特征工程**部分：可包含特征重要性排序、特征相关性图表等
+7. **数据可视化**部分：可包含数值型特征分布、相关性热图、时间序列分析、分类特征比较、特征散点图等
+8. **实证分析**部分：可包含模型性能对比图、特征系数可视化、残差分析图等
+9. **预案性分析**部分：可包含场景模拟结果对比图、敏感性分析图表等
+10. 每个主要分析部分至少包含1-2张相关可视化图片
+11. 图片应具有清晰的标题和说明，解释其展示的内容和洞察
+
+## 序号列表格式要求
+- 序号列表的每个项目之间必须空一行，不要写到一行里
+- 例如：
+  ```
+  1. 第一点内容
+  
+  2. 第二点内容
+  
+  3. 第三点内容
+  ```
+
+## 五大分析过程详细要求
+
+### 1. 数据预处理
+- 描述数据加载和基本信息
+- 说明缺失值处理方法（删除、填充等）
+- 描述异常值检测和处理方法
+- 说明数据类型转换和标准化处理
+- 介绍添加的衍生特征及其意义
+
+### 2. 特征工程
+- 描述分类特征的编码方法（独热编码、标签编码等）
+- 说明数值特征的缩放方法（标准化、归一化等）
+- 介绍特征选择方法（递归特征消除、选择K个最好特征等）
+- 说明特征降维方法（如PCA）
+- 描述最终选择的特征集及其理由
+
+### 3. 数据可视化
+- 展示数值型特征的分布情况
+- 分析特征间的相关性
+- 展示分类特征的分布情况
+- 分析时间序列特征的趋势（如果有）
+- 展示关键特征之间的关系
+
+### 4. 实证分析
+- 描述采用的模型（线性回归、岭回归、Lasso、随机森林、梯度提升树、LSTM等）
+- 展示模型性能比较结果（如R²、MSE、MAE等）
+- 分析特征重要性和模型解释
+- 说明模型选择的理由
+
+### 5. 预案性分析
+- 描述场景分析的方法和假设
+- 展示不同场景下的模拟结果
+- 分析关键参数的敏感性
+- 提供基于场景分析的洞察
+
+请使用Markdown格式生成一份结构完整、内容丰富、包含五大分析过程的综合数据分析报告，确保使用实际的可视化图片路径，并在报告中适当位置插入这些图片。"""
+        
+        # 构建第三部分prompt：进一步完善报告内容
+        prompt_part3 = f"""请根据以下已经生成的报告内容，进一步完善和扩展报告，使其更加详细、专业和全面：
+
+{prompt_part2}
+
+## 完善报告的要求
+1. 深入挖掘分析结果中的关键洞察和业务价值
+2. 补充更多的数据支持和详细分析
+3. 丰富报告的理论基础和方法论解释
+4. 扩展建议与行动方案，提供更具体的实施步骤和预期效果
+5. 增强报告的可读性和专业度，确保内容更加充实和有深度
+6. 确保所有部分都符合报告撰写的详细要求和格式规范
+
+随着第二的报告继续完善"""
         
         # 生成报告内容
         if hasattr(self, 'use_real_llm') and self.use_real_llm and hasattr(self, 'api_key') and self.api_key:
             # 使用自定义的OpenAIClientLLM类直接调用DeepSeek API
             llm = OpenAIClientLLM(
-                api_key=self.api_key,
-                base_url="https://api.deepseek.com/v1",
-                model="deepseek-chat",
-                temperature=0.1
+                api_key=self.api_key
+                # base_url和model将从.env文件加载
             )
-            report_content = llm._call(custom_prompt)
+            # 分三次调用API，逐步完善报告内容
+            print("=== 正在生成报告框架... ===")
+            report_framework = llm._call(prompt_part1)
+            print("=== 正在生成完整报告内容... ===")
+            initial_report = llm._call(prompt_part2 + f"\n\n以下是之前生成的报告框架作为参考：\n{report_framework}")
+            print("=== 正在进一步完善报告... ===")
+            report_content = llm._call(prompt_part3 + f"\n\n以下是已经生成的报告内容作为参考：\n{initial_report}")
+        else:
+            # 使用API文档内容作为报告
+            report_content = f"# 数据分析报告\n\n" + api_docs_content
         
         # 将报告内容保存到文件
         try:
@@ -770,7 +811,7 @@ class LangChainDataAnalysisAgent:
             print(f"=== 报告保存失败: {e} ===")
             return f"报告生成失败: {e}"
  
-    def create_agent_executor(self, use_real_llm=False, api_key='your_api_key_here'):
+    def create_agent_executor(self, use_real_llm=False, api_key='DEEPSEEK_API_KEY'):
         """创建并返回Agent执行器
         
         Args:
@@ -784,12 +825,10 @@ class LangChainDataAnalysisAgent:
         
         # 初始化大模型
         if use_real_llm and api_key:
-            # 使用自定义的OpenAIClientLLM类直接调用DeepSeek API
+            # 使用自定义的OpenAIClientLLM类直接调用API，配置从.env文件加载
             llm = OpenAIClientLLM(
-                api_key=api_key,
-                base_url="https://api.deepseek.com/v1",
-                model="deepseek-chat",
-                temperature=0.1
+                api_key=api_key
+                # base_url和model将从.env文件加载
             )
  
 
@@ -823,13 +862,17 @@ def main():
     print("="*60)
     
     try:
+        # 加载.env文件
+        from dotenv import load_dotenv
+        import os
+        load_dotenv()
+        
         # 创建Agent实例
         agent = LangChainDataAnalysisAgent()
         
-        # 默认使用真实DeepSeek模型
-        use_real_llm = True
-        # 直接提供API密钥
-        api_key = "your_api_key_here"
+        # 从环境变量加载配置
+        use_real_llm = os.getenv("USE_REAL_LLM", "True").lower() == "true"
+        api_key = os.getenv("DEEPSEEK_API_KEY")
 
         # 保存配置信息
         agent.use_real_llm = use_real_llm

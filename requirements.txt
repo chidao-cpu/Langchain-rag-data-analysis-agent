@@ -1,18 +1,33 @@
+# 核心数据处理与分析依赖
 numpy>=1.26.0
 pandas>=2.2.0
 scikit-learn>=1.4.0
+
+# 数据可视化依赖
 matplotlib>=3.8.0
 seaborn>=0.13.0
 sweetviz>=2.2.0
+
+# 高性能数据处理
 pyarrow>=15.0.0
+
+# 环境与工具依赖
 python-dotenv>=1.0.0
+tabulate>=0.9.0
+
+# 交互式开发
 jupyter>=1.0.0
+
+# LangChain框架及相关组件
 langchain>=0.1.0
 langchain-core>=0.1.0
 langchain-openai>=0.1.0
 langchain-community>=0.1.0
-openai>=1.0.0
-langchain-experimental>=0.0.50
-litellm>=1.30.0
+langchain-text-splitters>=0.0.1
+
+# 大语言模型接口
+oai>=1.0.0
+
+# RAG技术组件
 faiss-cpu>=1.7.4
 sentence-transformers>=2.5.0

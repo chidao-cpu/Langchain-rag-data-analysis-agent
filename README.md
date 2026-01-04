@@ -2,12 +2,15 @@
 
 ## 项目简介
 
-这是一个基于LangChain框架构建的智能数据分析Agent系统，集成了RAG（检索增强生成）技术，实现了端到端的全流程数据分析。该系统能够自动完成数据预处理、特征工程、数据可视化、实证分析、预案性分析，并最终生成包含真实数据的专业分析报告。
+智能数据分析Agent系统是一个基于LangChain框架构建的全自动化数据分析平台，集成了RAG（检索增强生成）技术，实现了端到端的数据分析全流程。该系统能够自动完成数据预处理、特征工程、数据可视化、实证分析、预案性分析，并最终生成包含真实数据的专业分析报告。
 
-## 关键词
-- **算法Agent**：基于LangChain构建的智能数据分析Agent，具备自主决策和工具使用能力
-- **RAG技术**：检索增强生成，用于从向量库中检索相关数据分析API信息，辅助决策
-- **数据分析全流程**：端到端的数据处理和分析流程，包括数据预处理、特征工程、可视化、实证分析和场景分析
+### 核心价值
+
+- **自动化分析**：无需人工干预，自动完成从数据清洗到报告生成的全流程
+- **智能决策**：基于RAG技术从向量库中检索最佳分析方法，辅助Agent做出决策
+- **可视化输出**：自动生成多种图表和可视化结果，直观展示数据洞察
+- **可扩展架构**：模块化设计，支持轻松扩展新的分析功能和模型
+- **专业报告**：生成格式规范、内容全面的Markdown分析报告
 
 ## 项目结构
 
@@ -24,7 +27,9 @@ AI开发/
 ├── results/               # 分析结果目录
 │   ├── visualizations/    # 可视化图表
 │   ├── analysis_report.md # 综合分析报告
-│   └── ...                # 其他分析结果文件
+│   ├── correlation_matrix.csv  # 相关性矩阵
+│   ├── descriptive_statistics.csv  # 描述性统计
+│   └── model_training_results.csv  # 模型训练结果
 ├── src/                   # 源代码目录
 │   ├── empirical_analysis/    # 实证分析模块
 │   ├── feature_engineering/   # 特征工程模块
@@ -41,90 +46,89 @@ AI开发/
 
 ## 技术栈
 
-- **核心框架**：LangChain
-- **LLM接口**：DeepSeek API
-- **数据处理**：NumPy, Pandas
-- **机器学习**：Scikit-learn 
-- **数据可视化**：Matplotlib, Seaborn
-- **RAG组件**：FAISS, HuggingFace Embeddings
-- **其他工具**：python-dotenv, Jupyter
+| 类别 | 技术 | 版本要求 |
+|------|------|----------|
+| 核心框架 | LangChain | >=0.1.0 |
+| 大语言模型 | DeepSeek API | - |
+| 数据处理 | NumPy, Pandas | >=1.26.0, >=2.2.0 |
+| 机器学习 | Scikit-learn | >=1.4.0 |
+| 数据可视化 | Matplotlib, Seaborn | >=3.8.0, >=0.13.0 |
+| 交互式可视化 | Sweetviz | >=2.2.0 |
+| 高性能数据 | PyArrow | >=15.0.0 |
+| RAG组件 | FAISS, Sentence-transformers | >=1.7.4, >=2.5.0 |
+| 开发工具 | Python-dotenv, Jupyter | >=1.0.0 |
 
 ## 功能特性
 
-### 1. 智能数据分析Agent
-- 基于LangChain构建的自主Agent，具备工具使用能力
-- 能够根据数据集特征动态生成分析策略
-- 支持交互式数据分析和查询
+### 1. 数据预处理模块
 
-### 2. RAG增强的决策系统
-- 基于向量库的数据分析API信息检索
-- 辅助Agent选择最合适的分析方法和工具
-- 提供相关API的详细说明和使用示例
+- ✅ **缺失值处理**：自动检测并处理缺失值
+- ✅ **数据类型转换**：智能转换数据类型（日期、分类变量等）
+- ✅ **异常值检测**：基于IQR方法检测和处理异常值
+- ✅ **衍生特征生成**：自动生成有用的衍生特征
 
-### 3. 全流程数据分析
+### 2. 特征工程模块
 
-#### 数据预处理
-- 缺失值处理
-- 数据类型转换
-- 异常值检测和处理
-- 衍生特征添加
+- ✅ **时间特征提取**：从日期时间列提取有用信息
+- ✅ **分类特征编码**：自动编码分类变量
+- ✅ **数值特征缩放**：标准化或归一化数值特征
+- ✅ **特征选择**：基于统计方法选择重要特征
 
-#### 特征工程
-- 时间特征提取
-- 分类特征编码
-- 数值特征缩放
-- 特征选择
+### 3. 数据可视化模块
 
-#### 数据可视化
-- 数值分布分析
-- 相关性热图
-- 时间序列分析
-- 分类特征比较
-- 地理分布分析
+- ✅ **数值分布分析**：直方图、箱线图等
+- ✅ **相关性分析**：热图、散点图矩阵
+- ✅ **时间序列分析**：趋势图、季节性分析
+- ✅ **分类特征比较**：条形图、饼图等
 
-#### 实证分析
-- 描述性统计分析
-- 相关性分析
-- 回归模型训练与评估
-- 模型性能比较
+### 4. 实证分析模块
 
-#### 预案性分析
-- 销售增长场景分析
-- 价格变化场景分析
-- 成本降低场景分析
-- 组合场景分析
+- ✅ **描述性统计**：均值、中位数、标准差等
+- ✅ **相关性分析**：计算和可视化变量间相关性
+- ✅ **回归模型**：训练和评估多种回归模型
+- ✅ **模型性能比较**：交叉验证和指标对比
 
-### 4. 智能报告生成
-- 基于自定义Prompt的综合报告生成
-- 包含真实分析数据的Markdown格式报告
-- 突出关键发现和业务建议
+### 5. 预案性分析模块
 
-## 安装指南
+- ✅ **销售增长场景**：模拟不同销售增长情况下的结果
+- ✅ **价格变化场景**：分析价格调整对利润的影响
+- ✅ **成本降低场景**：评估成本降低策略的效果
+- ✅ **组合场景分析**：多因素组合分析
 
-### 1. 环境要求
-- Python 3.10+
-- pip 22.0+
+### 6. 智能报告生成
+
+- ✅ **自定义报告结构**：可配置的报告模板
+- ✅ **真实数据分析**：所有报告包含真实数据
+- ✅ **可视化集成**：自动嵌入生成的图表
+- ✅ **业务洞察**：智能生成有价值的业务建议
+
+## 快速开始
+
+### 1. 环境准备
+
+- **Python版本**：3.10或更高版本
+- **pip版本**：22.0或更高版本
 
 ### 2. 安装依赖
 
 ```bash
-# 克隆项目
-cd f:\vscode project 3\AI开发
+# 克隆项目或进入项目目录
+cd "f:\vscode project 3\AI开发"
 
-# 安装依赖
+# 安装项目依赖
 pip install -r requirements.txt
-
-# 安装额外依赖（用于Markdown表格生成）
-pip install tabulate
 ```
 
 ### 3. 配置环境变量
 
-修改`.env`文件，配置必要的环境变量：
+创建或修改`.env`文件，配置必要的环境变量：
 
 ```
-# API密钥配置
+# DeepSeek API密钥配置
 DEEPSEEK_API_KEY=your_api_key_here
+DEEPSEEK_API_BASE=https://api.deepseek.com/v1
+DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_TEMPERATURE=0.1
 
 # 数据文件路径
 RAW_DATA_FILE=data/raw_data.csv
@@ -135,104 +139,106 @@ FEATURES_DATA_FILE=data/features_data.csv
 ANALYSIS_REPORT=results/analysis_report.md
 ```
 
-## 运行指南
-
-### 1. 运行完整数据分析流程
+### 4. 运行系统
 
 ```bash
-cd f:\vscode project 3\AI开发
+# 运行完整数据分析流程
 python src/langchain_agent.py
 ```
 
-这将启动完整的数据分析流程：
-1. 数据预处理
-2. 特征工程
-3. 数据可视化
-4. 实证分析
-5. 预案性分析
-6. 生成综合报告
+### 5. 查看结果
 
-### 2. 观察分析结果
+分析完成后，结果将保存在以下位置：
 
-分析完成后，结果将保存到以下目录：
+- **数据文件**：`data/`目录下的CSV文件
+- **可视化图表**：`results/visualizations/`目录下的图片文件
+- **分析报告**：`results/analysis_report.md`文件
 
-- **数据文件**：`data/`
-  - `raw_data.csv`：原始数据
-  - `processed_data.csv`：预处理后的数据
-  - `features_data.csv`：特征工程后的数据
+## 系统配置
 
-- **可视化图表**：`results/visualizations/`
-  - 相关性热图、特征重要性图、时间序列图等
-
-- **分析报告**：`results/analysis_report.md`
-  - 包含完整的分析结果和业务建议
-  - 所有数据均为真实值，无占位符
-
-- **其他结果**：`results/`目录下的CSV文件
-  - 模型训练结果
-  - 相关性矩阵
-  - 场景分析结果
-
-## 使用说明
-
-### 1. 自定义数据分析
-
-系统支持通过修改`src/config.py`文件来自定义分析参数：
+可以通过修改`src/config.py`文件来自定义系统配置：
 
 ```python
-# 特征选择方法
-FEATURE_SELECTION_METHOD = 'selectkbest'
-
-# 异常值检测方法
-OUTLIER_DETECTION_METHOD = 'iqr'
+# 数据处理配置
+DATA_PROCESSING_CONFIG = {
+    'outlier_detection_method': 'iqr',  # 异常值检测方法
+    'missing_value_strategy': 'auto',    # 缺失值处理策略
+    'feature_selection_method': 'selectkbest'  # 特征选择方法
+}
 
 # 可视化配置
 PLOT_CONFIG = {
-    'figsize': (12, 8),
-    'dpi': 300,
-    'style': 'seaborn-v0_8-whitegrid'
+    'figsize': (12, 8),      # 图表尺寸
+    'dpi': 300,              # 图表分辨率
+    'style': 'seaborn-v0_8-whitegrid'  # 图表样式
+}
+
+# 模型配置
+MODEL_CONFIG = {
+    'model_types': ['linear', 'random_forest', 'xgboost'],  # 使用的模型类型
+    'cv_folds': 5,           # 交叉验证折数
+    'random_state': 42       # 随机种子
 }
 ```
 
-### 2. 扩展分析功能
+## 扩展系统
 
-可以通过在`src/`目录下添加新的模块来扩展分析功能，例如：
-- 添加新的机器学习模型
-- 扩展场景分析的类型
-- 增加新的数据可视化图表
+### 添加新的分析功能
 
-### 3. 修改报告模板
+可以通过在`src/`目录下添加新的模块来扩展系统功能：
 
-报告模板可以在`src/langchain_agent.py`文件中的`generate_report_with_custom_prompt`方法中修改，自定义报告的结构和内容。
+1. 创建新的Python文件，实现新的分析功能
+2. 在`src/langchain_agent.py`中注册新功能作为工具
+3. 更新RAG向量库，添加新功能的API文档
 
-## Agent功能详解
+### 扩展场景分析
 
-### 1. 工具集
+可以在`src/scenario_analysis/scenario_analyzer.py`中添加新的场景分析函数：
 
-Agent系统包含以下工具：
-- 数据预处理：处理原始数据
-- 特征工程：生成和选择特征
-- 数据可视化：生成各种图表
-- 实证分析：进行统计和建模分析
-- 预案性分析：模拟不同业务场景
-- 完整数据分析流程：运行全流程分析
-- RAG检索：检索相关数据分析API信息
+```python
+def new_scenario_analysis(self, data, parameters):
+    # 实现新的场景分析逻辑
+    pass
+```
 
-### 2. RAG机制
+## 常见问题
 
-系统使用FAISS向量库存储数据分析API信息，当Agent需要选择分析方法时，会通过RAG机制检索相关信息，提高分析的准确性和专业性。
+### 1. 报告内容被截断怎么办？
 
-### 3. 报告生成
+系统已自动设置`max_tokens=8192`（DeepSeek API允许的最大值），确保生成完整的报告内容。
 
-报告生成使用自定义Prompt和DeepSeek API，确保生成的报告包含真实的分析数据和有价值的业务洞察。
+### 2. 运行时出现API错误怎么办？
 
-## 项目贡献
+- 检查`.env`文件中的API密钥和配置是否正确
+- 确保网络连接正常
+- 查看错误信息，根据提示进行修复
+
+### 3. 如何修改报告的格式和内容？
+
+可以在`src/langchain_agent.py`文件中的`generate_report_with_custom_prompt`方法中修改报告模板。
+
+### 4. 如何添加自定义的可视化图表？
+
+可以在`src/visualization/visualizer.py`中添加新的可视化函数，并在`src/langchain_agent.py`中注册为工具。
+
+## 技术文档
+
+详细的技术文档请参考`docs/`目录下的文件：
+
+- **数据预处理API**：`docs/api_docs/data_preprocessing.md`
+- **特征工程API**：`docs/api_docs/feature_engineering.md`
+- **数据可视化API**：`docs/api_docs/data_visualization.md`
+- **回归分析API**：`docs/api_docs/regression_analysis.md`
+- **场景分析报告**：`docs/api_docs/scenario_analysis_report.md`
+
+## 贡献指南
 
 欢迎对项目进行贡献！贡献方式包括：
-- 修复bug
-- 增加新功能
-- 优化现有算法
-- 完善文档
+
+- **修复bug**：提交Issue和Pull Request
+- **增加新功能**：开发新的分析模块或功能
+- **优化代码**：提高性能或可读性
+- **完善文档**：更新和补充技术文档
 
 ## 许可证
 
@@ -241,6 +247,7 @@ Agent系统包含以下工具：
 ## 联系方式
 
 如有问题或建议，请通过以下方式联系：
+
 - 邮箱：2945128239@qq.com
 
 ---

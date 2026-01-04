@@ -22,7 +22,9 @@ class Config:
     OUTLIER_THRESHOLD = 1.5
     
     # 特征工程配置
+    TARGET_COL = None  # 目标列，默认自动识别
     FEATURE_SELECTION_METHOD = 'rfecv'
+    TASK_TYPE = 'regression'  # 任务类型：regression, classification
     TEST_SIZE = 0.2
     RANDOM_STATE = 42
     
